@@ -69,6 +69,7 @@ const ClaimSchema = new mongoose.Schema(
 
     // Marqueur spécial
     marqueurMalTraite: { type: Boolean, default: false },
+    urgente: { type: Boolean, default: false },
 
     // Suivi
     historique: [ResponseSchema],

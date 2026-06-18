@@ -34,18 +34,19 @@ exports.list = async (req, res) => {
     let query = {};
     const { role, _id } = req.user;
 
-    if (role === "client") query = { client: _id };
-    else if (role === "service_clientele")
+    if (role === "client") {
+      query = { client: _id };
+    } else if (role === "service_clientele") {
       query = {
         serviceAssigne: "service_clientele",
         statut: { $nin: ["resolue", "archivee"] },
       };
-    else if (role.startsWith("service"))
+    } else if (role.startsWith("service")) {
       query = {
         serviceAssigne: role,
         statut: { $nin: ["resolue", "archivee"] },
       };
-    // admin voit tout
+    }
 
     const claims = await Claim.find(query)
       .populate(
@@ -54,8 +55,39 @@ exports.list = async (req, res) => {
       )
       .sort({ createdAt: -1 });
 
+    const now = Date.now();
+    const SEUIL = 24 * 60 * 60 * 1000;
+
+    // Mise à jour urgente sans bloquer si erreur
+    for (const c of claims) {
+      try {
+        const enAttente = !["resolue", "archivee", "reponse_envoyee"].includes(
+          c.statut,
+        );
+        const depasse = now - new Date(c.createdAt).getTime() > SEUIL;
+        const devraitEtreUrgente = enAttente && depasse;
+
+        if (devraitEtreUrgente !== Boolean(c.urgente)) {
+          await Claim.findByIdAndUpdate(c._id, { urgente: devraitEtreUrgente });
+          c.urgente = devraitEtreUrgente;
+        }
+      } catch (e) {
+        console.warn("Erreur urgente pour claim", c._id, e.message);
+      }
+    }
+
+    // Tri : urgentes > mal traitées > reste
+    claims.sort((a, b) => {
+      if (a.urgente && !b.urgente) return -1;
+      if (!a.urgente && b.urgente) return 1;
+      if (a.marqueurMalTraite && !b.marqueurMalTraite) return -1;
+      if (!a.marqueurMalTraite && b.marqueurMalTraite) return 1;
+      return new Date(b.createdAt) - new Date(a.createdAt);
+    });
+
     res.json(claims);
   } catch (err) {
+    console.error("Erreur list claims:", err);
     res.status(500).json({ message: err.message });
   }
 };
@@ -63,26 +95,32 @@ exports.list = async (req, res) => {
 // PATCH /api/claims/:id/assign — Triage par service_clientele
 exports.assign = async (req, res) => {
   try {
+    console.log("=== ASSIGN appelé ===");
+    console.log("Params:", req.params);
+    console.log("Body:", req.body);
+    console.log("User:", req.user?.role, req.user?._id);
+
     const { typeReclamation, serviceAssigne } = req.body;
     const claim = await Claim.findById(req.params.id);
 
-    if (!claim)
+    if (!claim) {
+      console.log("Réclamation introuvable");
       return res.status(404).json({ message: "Réclamation introuvable" });
+    }
+
+    console.log("Claim avant:", claim.serviceAssigne, claim.statut);
 
     claim.typeReclamation = typeReclamation || claim.typeReclamation;
     claim.serviceAssigne = serviceAssigne;
     claim.statut = "dirigee_service";
-    await claim.save();
+    claim.urgente = false;
 
-    // Notification client
-    const client = await User.findById(claim.client);
-    await sendClaimNotification(
-      client.email,
-      `Votre réclamation a été dirigée vers le service compétent.`,
-    );
+    const saved = await claim.save();
+    console.log("Claim après save:", saved.serviceAssigne, saved.statut);
 
-    res.json(claim);
+    res.json(saved);
   } catch (err) {
+    console.error("Erreur assign:", err);
     res.status(500).json({ message: err.message });
   }
 };

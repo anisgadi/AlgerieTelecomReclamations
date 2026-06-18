@@ -11,12 +11,75 @@ const SERVICE_LABELS = {
   service_clientele: "Service Clientèle",
 };
 
+// Calcule le temps écoulé depuis la création
+function tempsEcoule(dateStr) {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const h = Math.floor(diff / 3600000);
+  const m = Math.floor((diff % 3600000) / 60000);
+  if (h >= 24) return `${Math.floor(h / 24)}j ${h % 24}h`;
+  if (h > 0) return `${h}h ${m}min`;
+  return `${m} min`;
+}
+
+// Barre de temps — rouge si > 24h
+function TimerBar({ createdAt, urgente }) {
+  const diff = Date.now() - new Date(createdAt).getTime();
+  const heures = diff / 3600000;
+  const pct = Math.min((heures / 24) * 100, 100);
+  const color = urgente
+    ? "#ef4444"
+    : heures > 18
+      ? "#f97316"
+      : heures > 12
+        ? "#f59e0b"
+        : "#22c55e";
+
+  return (
+    <div style={{ marginBottom: ".6rem" }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          marginBottom: 3,
+        }}
+      >
+        <span style={{ fontSize: ".7rem", fontWeight: 600, color }}>
+          {urgente ? "⚠ URGENTE — " : ""}
+          {tempsEcoule(createdAt)}
+        </span>
+        <span style={{ fontSize: ".7rem", color: "var(--gris-400)" }}>
+          {urgente ? "Dépasse 24h" : `${Math.round(pct)}% du délai`}
+        </span>
+      </div>
+      <div
+        style={{
+          height: 4,
+          background: "var(--gris-200)",
+          borderRadius: 99,
+          overflow: "hidden",
+        }}
+      >
+        <div
+          style={{
+            height: "100%",
+            width: `${pct}%`,
+            background: color,
+            borderRadius: 99,
+            transition: "width .5s",
+            boxShadow: urgente ? `0 0 6px ${color}` : "none",
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
 export default function Dashboard() {
   const { user } = useAuth();
   const [claims, setClaims] = useState([]);
   const [loading, setLoading] = useState(true);
   const [reponses, setReponses] = useState({});
-  const [contactForm, setContactForm] = useState(null); // { claimId, type }
+  const [contactForm, setContactForm] = useState(null);
   const [contactMsg, setContactMsg] = useState("");
 
   const load = async () => {
@@ -32,12 +95,24 @@ export default function Dashboard() {
     load();
   }, []);
 
-  const assign = async (id, serviceAssigne, typeReclamation) => {
-    await api.patch(`/claims/${id}/assign`, {
-      serviceAssigne,
-      typeReclamation,
-    });
-    load();
+  // Rafraîchir toutes les minutes pour mettre à jour les timers
+  useEffect(() => {
+    const interval = setInterval(load, 60000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const assign = async (id, serviceAssigne) => {
+    try {
+      console.log("Envoi assign:", id, serviceAssigne);
+      const { data } = await api.patch(`/claims/${id}/assign`, {
+        serviceAssigne,
+      });
+      console.log("Réponse assign:", data);
+      load();
+    } catch (err) {
+      console.error("Erreur assign:", err.response?.data || err.message);
+      alert("Erreur: " + (err.response?.data?.message || err.message));
+    }
   };
 
   const respond = async (id) => {
@@ -70,11 +145,56 @@ export default function Dashboard() {
       </div>
     );
 
+  const urgentes = claims.filter((c) => c.urgente);
+  const normales = claims.filter((c) => !c.urgente);
+
   return (
     <div className="container page">
-      <h1 className="page-title">
-        Tableau de bord — {SERVICE_LABELS[user?.role] || user?.role}
-      </h1>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: "1.5rem",
+        }}
+      >
+        <h1 className="page-title" style={{ margin: 0 }}>
+          {SERVICE_LABELS[user?.role] || user?.role}
+        </h1>
+        <div style={{ display: "flex", gap: ".5rem", alignItems: "center" }}>
+          {urgentes.length > 0 && (
+            <span
+              style={{
+                background: "#fef2f2",
+                color: "#dc2626",
+                border: "1px solid #fecaca",
+                borderRadius: 99,
+                padding: "4px 12px",
+                fontSize: ".78rem",
+                fontWeight: 700,
+                animation: "pulse-red 2s infinite",
+              }}
+            >
+              {urgentes.length} urgente{urgentes.length > 1 ? "s" : ""}
+            </span>
+          )}
+          <span style={{ fontSize: ".78rem", color: "var(--gris-400)" }}>
+            {claims.length} réclamation{claims.length > 1 ? "s" : ""}
+          </span>
+        </div>
+      </div>
+
+      {/* Style animation pulse */}
+      <style>{`
+        @keyframes pulse-red {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(239,68,68,0); }
+          50% { box-shadow: 0 0 0 4px rgba(239,68,68,0.2); }
+        }
+        @keyframes border-pulse {
+          0%, 100% { border-color: #ef4444; }
+          50% { border-color: #fca5a5; }
+        }
+      `}</style>
 
       {/* Modal contact */}
       {contactForm && (
@@ -91,8 +211,7 @@ export default function Dashboard() {
         >
           <div className="card" style={{ width: 440, maxWidth: "90vw" }}>
             <h3 style={{ marginBottom: "1rem", fontWeight: 700 }}>
-              Contacter le client via{" "}
-              {contactForm.type === "email" ? "Email" : "SMS"}
+              Contacter via {contactForm.type === "email" ? "Email" : "SMS"}
             </h3>
             <div className="form-group">
               <label className="form-label">Message</label>
@@ -121,90 +240,311 @@ export default function Dashboard() {
       {claims.length === 0 && (
         <div
           className="card"
-          style={{ textAlign: "center", color: "var(--gris-400)" }}
+          style={{
+            textAlign: "center",
+            color: "var(--gris-400)",
+            padding: "3rem",
+          }}
         >
           Aucune réclamation en attente.
         </div>
       )}
 
-      {claims.map((c) => (
-        <div
-          key={c._id}
-          className="card"
-          style={{
-            marginBottom: "1rem",
-            borderLeft: c.marqueurMalTraite
-              ? "4px solid var(--rouge)"
-              : "4px solid var(--violet-border)",
-          }}
-        >
+      {/* ── SECTION URGENTES ── */}
+      {urgentes.length > 0 && (
+        <div style={{ marginBottom: "1.5rem" }}>
           <div
             style={{
               display: "flex",
-              justifyContent: "space-between",
-              flexWrap: "wrap",
+              alignItems: "center",
               gap: ".5rem",
               marginBottom: ".75rem",
             }}
           >
-            <div>
-              {c.marqueurMalTraite && (
-                <span
-                  className="badge badge-rouge"
-                  style={{ marginRight: ".5rem" }}
-                >
-                  Mal traité
-                </span>
-              )}
-              <span style={{ fontWeight: 700, fontSize: ".9rem" }}>
-                {c.client?.prenom} {c.client?.nom}
-              </span>
-              <span
-                style={{
-                  color: "var(--gris-400)",
-                  fontSize: ".8rem",
-                  marginLeft: ".75rem",
-                }}
-              >
-                {c.client?.wilaya} · {c.client?.typeAbonnement}
-              </span>
-            </div>
-            <span style={{ fontSize: ".75rem", color: "var(--gris-400)" }}>
-              {new Date(c.createdAt).toLocaleDateString("fr-DZ")}
+            <div
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: "50%",
+                background: "#ef4444",
+                boxShadow: "0 0 0 3px rgba(239,68,68,.2)",
+                animation: "pulse-red 1.5s infinite",
+              }}
+            />
+            <span
+              style={{
+                fontSize: ".8rem",
+                fontWeight: 700,
+                color: "#dc2626",
+                textTransform: "uppercase",
+                letterSpacing: ".05em",
+              }}
+            >
+              Réclamations urgentes — non traitées depuis plus de 24h
             </span>
           </div>
 
-          {c.typeReclamation && (
+          {urgentes.map((c) => (
+            <ClaimCard
+              key={c._id}
+              claim={c}
+              user={user}
+              reponses={reponses}
+              setReponses={setReponses}
+              onAssign={assign}
+              onRespond={respond}
+              onReturn={returnClaim}
+              onContact={(id, type) => setContactForm({ id, type })}
+              urgent
+            />
+          ))}
+        </div>
+      )}
+
+      {/* ── SECTION NORMALES ── */}
+      {normales.length > 0 && (
+        <div>
+          {urgentes.length > 0 && (
             <div
               style={{
-                fontSize: ".8rem",
-                color: "var(--violet)",
+                display: "flex",
+                alignItems: "center",
+                gap: ".5rem",
+                marginBottom: ".75rem",
+              }}
+            >
+              <div
+                style={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: "50%",
+                  background: "var(--violet)",
+                }}
+              />
+              <span
+                style={{
+                  fontSize: ".8rem",
+                  fontWeight: 700,
+                  color: "var(--gris-600)",
+                  textTransform: "uppercase",
+                  letterSpacing: ".05em",
+                }}
+              >
+                En cours de traitement
+              </span>
+            </div>
+          )}
+          {normales.map((c) => (
+            <ClaimCard
+              key={c._id}
+              claim={c}
+              user={user}
+              reponses={reponses}
+              setReponses={setReponses}
+              onAssign={assign}
+              onRespond={respond}
+              onReturn={returnClaim}
+              onContact={(id, type) => setContactForm({ id, type })}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── COMPOSANT CARTE RÉCLAMATION ──────────────────────────
+function ClaimCard({
+  claim: c,
+  user,
+  reponses,
+  setReponses,
+  onAssign,
+  onRespond,
+  onReturn,
+  onContact,
+  urgent,
+}) {
+  const [expanded, setExpanded] = useState(urgent); // urgentes ouvertes par défaut
+
+  return (
+    <div
+      style={{
+        background: urgent ? "#fff5f5" : "white",
+        border: urgent ? "2px solid #ef4444" : "1px solid var(--gris-200)",
+        borderRadius: 14,
+        marginBottom: ".75rem",
+        overflow: "hidden",
+        animation: urgent ? "border-pulse 2s infinite" : "none",
+        boxShadow: urgent
+          ? "0 4px 16px rgba(239,68,68,.12)"
+          : "0 1px 4px rgba(0,0,0,.05)",
+      }}
+    >
+      {/* Barre colorée en haut */}
+      <div
+        style={{
+          height: 3,
+          background: urgent
+            ? "linear-gradient(90deg, #ef4444, #f97316)"
+            : c.marqueurMalTraite
+              ? "#ef4444"
+              : "linear-gradient(90deg, var(--violet), var(--violet-clair))",
+        }}
+      />
+
+      {/* En-tête cliquable */}
+      <div
+        onClick={() => setExpanded(!expanded)}
+        style={{
+          padding: ".875rem 1.25rem",
+          cursor: "pointer",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+        }}
+      >
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: ".5rem",
+              flexWrap: "wrap",
+              marginBottom: 4,
+            }}
+          >
+            {urgent && (
+              <span
+                style={{
+                  background: "#ef4444",
+                  color: "white",
+                  borderRadius: 99,
+                  padding: "2px 10px",
+                  fontSize: ".7rem",
+                  fontWeight: 800,
+                  letterSpacing: ".03em",
+                }}
+              >
+                URGENT
+              </span>
+            )}
+            {c.marqueurMalTraite && (
+              <span
+                style={{
+                  background: "#fef2f2",
+                  color: "#dc2626",
+                  border: "1px solid #fecaca",
+                  borderRadius: 99,
+                  padding: "2px 9px",
+                  fontSize: ".7rem",
+                  fontWeight: 700,
+                }}
+              >
+                Mal traité
+              </span>
+            )}
+            <span style={{ fontWeight: 700, fontSize: ".9rem" }}>
+              {c.client?.prenom} {c.client?.nom}
+            </span>
+            <span style={{ fontSize: ".78rem", color: "var(--gris-400)" }}>
+              {c.client?.wilaya}
+              {c.client?.typeAbonnement && ` · ${c.client.typeAbonnement}`}
+            </span>
+          </div>
+
+          {/* Timer bar */}
+          <TimerBar createdAt={c.createdAt} urgente={urgent || c.urgente} />
+
+          {c.typeReclamation && (
+            <span
+              style={{
+                fontSize: ".73rem",
                 fontWeight: 600,
-                marginBottom: ".3rem",
+                color: "var(--violet)",
+                background: "var(--violet-bg)",
+                padding: "2px 8px",
+                borderRadius: 99,
+                border: "1px solid var(--violet-border)",
               }}
             >
               {c.typeReclamation}
-            </div>
+            </span>
           )}
+        </div>
+
+        {/* Flèche expand */}
+        <div
+          style={{
+            color: "var(--gris-400)",
+            transition: "transform .2s",
+            transform: expanded ? "rotate(180deg)" : "rotate(0deg)",
+            flexShrink: 0,
+            marginLeft: "1rem",
+          }}
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+          >
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </div>
+      </div>
+
+      {/* Contenu expandable */}
+      {expanded && (
+        <div
+          style={{
+            padding: "0 1.25rem 1.25rem",
+            borderTop: "1px solid var(--gris-100)",
+          }}
+        >
           <p
             style={{
               fontSize: ".875rem",
               color: "var(--gris-600)",
-              marginBottom: "1rem",
+              margin: ".875rem 0",
+              lineHeight: 1.6,
             }}
           >
             {c.texte}
           </p>
 
-          {/* Historique réponses précédentes */}
+          {/* Infos client */}
+          <div
+            style={{
+              display: "flex",
+              gap: "1.5rem",
+              flexWrap: "wrap",
+              fontSize: ".78rem",
+              color: "var(--gris-600)",
+              background: "var(--gris-50)",
+              borderRadius: 8,
+              padding: ".6rem .875rem",
+              marginBottom: ".875rem",
+            }}
+          >
+            <span>📧 {c.client?.email}</span>
+            {c.client?.mobile && <span>📱 {c.client.mobile}</span>}
+            <span>
+              🕐 Déposée le {new Date(c.createdAt).toLocaleDateString("fr-DZ")}
+            </span>
+          </div>
+
+          {/* Historique */}
           {c.historique?.length > 0 && (
             <div
               style={{
                 background: "var(--gris-100)",
-                borderRadius: "var(--radius)",
+                borderRadius: 8,
                 padding: ".75rem",
-                marginBottom: "1rem",
-                fontSize: ".82rem",
+                marginBottom: ".875rem",
+                fontSize: ".8rem",
               }}
             >
               <div
@@ -212,6 +552,9 @@ export default function Dashboard() {
                   fontWeight: 700,
                   marginBottom: ".4rem",
                   color: "var(--gris-600)",
+                  fontSize: ".73rem",
+                  textTransform: "uppercase",
+                  letterSpacing: ".04em",
                 }}
               >
                 Historique
@@ -246,17 +589,31 @@ export default function Dashboard() {
           )}
 
           {/* Actions service_clientele */}
-          {user?.role === "service_clientele" && c.statut !== "resolue" && (
-            <div style={{ display: "flex", gap: ".5rem", flexWrap: "wrap" }}>
-              {SERVICES.map((s) => (
-                <button
-                  key={s}
-                  className="btn btn-secondary btn-sm"
-                  onClick={() => assign(c._id, s, c.typeReclamation)}
-                >
-                  → {SERVICE_LABELS[s]}
-                </button>
-              ))}
+          {user?.role === "service_clientele" && (
+            <div>
+              <div
+                style={{
+                  fontSize: ".75rem",
+                  fontWeight: 700,
+                  color: "var(--gris-400)",
+                  marginBottom: ".5rem",
+                  textTransform: "uppercase",
+                  letterSpacing: ".04em",
+                }}
+              >
+                Router vers
+              </div>
+              <div style={{ display: "flex", gap: ".4rem", flexWrap: "wrap" }}>
+                {SERVICES.map((s) => (
+                  <button
+                    key={s}
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => onAssign(c._id, s)}
+                  >
+                    {SERVICE_LABELS[s]}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
 
@@ -266,35 +623,35 @@ export default function Dashboard() {
               <div
                 style={{
                   display: "flex",
-                  gap: ".75rem",
-                  marginBottom: ".75rem",
+                  gap: ".5rem",
                   flexWrap: "wrap",
+                  marginBottom: ".75rem",
                 }}
               >
                 <button
                   className="btn btn-secondary btn-sm"
-                  onClick={() => returnClaim(c._id)}
+                  onClick={() => onReturn(c._id)}
                 >
                   Renvoyer au service clientèle
                 </button>
                 <button
                   className="btn btn-ghost btn-sm"
-                  onClick={() => setContactForm({ id: c._id, type: "email" })}
+                  onClick={() => onContact(c._id, "email")}
                 >
-                  Email client
+                  📧 Email client
                 </button>
                 <button
                   className="btn btn-ghost btn-sm"
-                  onClick={() => setContactForm({ id: c._id, type: "sms" })}
+                  onClick={() => onContact(c._id, "sms")}
                 >
-                  SMS client
+                  📱 SMS client
                 </button>
               </div>
               <div style={{ display: "flex", gap: ".5rem" }}>
                 <textarea
                   className="form-textarea"
                   rows={2}
-                  placeholder="Votre réponse..."
+                  placeholder="Votre réponse au client..."
                   value={reponses[c._id] || ""}
                   onChange={(e) =>
                     setReponses((r) => ({ ...r, [c._id]: e.target.value }))
@@ -304,7 +661,7 @@ export default function Dashboard() {
                 <button
                   className="btn btn-primary btn-sm"
                   style={{ alignSelf: "flex-end" }}
-                  onClick={() => respond(c._id)}
+                  onClick={() => onRespond(c._id)}
                 >
                   Répondre
                 </button>
@@ -312,7 +669,7 @@ export default function Dashboard() {
             </div>
           )}
         </div>
-      ))}
+      )}
     </div>
   );
 }
