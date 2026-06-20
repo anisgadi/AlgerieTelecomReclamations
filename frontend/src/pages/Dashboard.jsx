@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import api from "../api/axios";
 import { useAuth } from "../context/AuthContext";
+import ClaimThread from "../components/ClaimThread";
+import RdvPanel from "../components/RdvPanel";
 
 const SERVICES = ["service1", "service2", "service3", "service4"];
 const SERVICE_LABELS = {
@@ -11,7 +13,6 @@ const SERVICE_LABELS = {
   service_clientele: "Service Clientèle",
 };
 
-// Calcule le temps écoulé depuis la création
 function tempsEcoule(dateStr) {
   const diff = Date.now() - new Date(dateStr).getTime();
   const h = Math.floor(diff / 3600000);
@@ -21,7 +22,6 @@ function tempsEcoule(dateStr) {
   return `${m} min`;
 }
 
-// Barre de temps — rouge si > 24h
 function TimerBar({ createdAt, urgente }) {
   const diff = Date.now() - new Date(createdAt).getTime();
   const heures = diff / 3600000;
@@ -81,6 +81,7 @@ export default function Dashboard() {
   const [reponses, setReponses] = useState({});
   const [contactForm, setContactForm] = useState(null);
   const [contactMsg, setContactMsg] = useState("");
+  const [rdvBusy, setRdvBusy] = useState(null);
 
   const load = async () => {
     try {
@@ -95,7 +96,6 @@ export default function Dashboard() {
     load();
   }, []);
 
-  // Rafraîchir toutes les minutes pour mettre à jour les timers
   useEffect(() => {
     const interval = setInterval(load, 60000);
     return () => clearInterval(interval);
@@ -103,14 +103,9 @@ export default function Dashboard() {
 
   const assign = async (id, serviceAssigne) => {
     try {
-      console.log("Envoi assign:", id, serviceAssigne);
-      const { data } = await api.patch(`/claims/${id}/assign`, {
-        serviceAssigne,
-      });
-      console.log("Réponse assign:", data);
+      await api.patch(`/claims/${id}/assign`, { serviceAssigne });
       load();
     } catch (err) {
-      console.error("Erreur assign:", err.response?.data || err.message);
       alert("Erreur: " + (err.response?.data?.message || err.message));
     }
   };
@@ -125,6 +120,43 @@ export default function Dashboard() {
   const returnClaim = async (id) => {
     await api.patch(`/claims/${id}/return`);
     load();
+  };
+
+  const scheduleRdv = async (id, date) => {
+    setRdvBusy(id);
+    try {
+      await api.post(`/claims/${id}/rdv`, { date });
+      await load();
+    } catch (err) {
+      alert(err.response?.data?.message || err.message);
+    } finally {
+      setRdvBusy(null);
+    }
+  };
+
+  const cancelRdv = async (id) => {
+    if (!confirm("Annuler ce rendez-vous ?")) return;
+    setRdvBusy(id);
+    try {
+      await api.patch(`/claims/${id}/rdv/cancel`);
+      await load();
+    } catch (err) {
+      alert(err.response?.data?.message || err.message);
+    } finally {
+      setRdvBusy(null);
+    }
+  };
+
+  const reportRdv = async (id, payload) => {
+    setRdvBusy(id);
+    try {
+      await api.patch(`/claims/${id}/rdv/report`, payload);
+      await load();
+    } catch (err) {
+      alert(err.response?.data?.message || err.message);
+    } finally {
+      setRdvBusy(null);
+    }
   };
 
   const sendContact = async () => {
@@ -147,6 +179,20 @@ export default function Dashboard() {
 
   const urgentes = claims.filter((c) => c.urgente);
   const normales = claims.filter((c) => !c.urgente);
+
+  const cardProps = {
+    user,
+    reponses,
+    setReponses,
+    onAssign: assign,
+    onRespond: respond,
+    onReturn: returnClaim,
+    onContact: (id, type) => setContactForm({ id, type }),
+    onScheduleRdv: scheduleRdv,
+    onCancelRdv: cancelRdv,
+    onReportRdv: reportRdv,
+    rdvBusy,
+  };
 
   return (
     <div className="container page">
@@ -184,7 +230,6 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Style animation pulse */}
       <style>{`
         @keyframes pulse-red {
           0%, 100% { box-shadow: 0 0 0 0 rgba(239,68,68,0); }
@@ -285,18 +330,7 @@ export default function Dashboard() {
           </div>
 
           {urgentes.map((c) => (
-            <ClaimCard
-              key={c._id}
-              claim={c}
-              user={user}
-              reponses={reponses}
-              setReponses={setReponses}
-              onAssign={assign}
-              onRespond={respond}
-              onReturn={returnClaim}
-              onContact={(id, type) => setContactForm({ id, type })}
-              urgent
-            />
+            <ClaimCard key={c._id} claim={c} {...cardProps} urgent />
           ))}
         </div>
       )}
@@ -335,17 +369,7 @@ export default function Dashboard() {
             </div>
           )}
           {normales.map((c) => (
-            <ClaimCard
-              key={c._id}
-              claim={c}
-              user={user}
-              reponses={reponses}
-              setReponses={setReponses}
-              onAssign={assign}
-              onRespond={respond}
-              onReturn={returnClaim}
-              onContact={(id, type) => setContactForm({ id, type })}
-            />
+            <ClaimCard key={c._id} claim={c} {...cardProps} />
           ))}
         </div>
       )}
@@ -363,9 +387,34 @@ function ClaimCard({
   onRespond,
   onReturn,
   onContact,
+  onScheduleRdv,
+  onCancelRdv,
+  onReportRdv,
+  rdvBusy,
   urgent,
 }) {
-  const [expanded, setExpanded] = useState(urgent); // urgentes ouvertes par défaut
+  const [expanded, setExpanded] = useState(urgent);
+
+  const threadMsgs = c.conversation?.length
+    ? c.conversation
+    : [
+        ...(c.historique || []).map((h) => ({
+          role: h.service || "service1",
+          texte: h.texte,
+          type: "message",
+          date: h.date,
+        })),
+        ...(c.reponseActuelle
+          ? [
+              {
+                role: c.reponseActuelle.service || "service1",
+                texte: c.reponseActuelle.texte,
+                type: "message",
+                date: c.reponseActuelle.date,
+              },
+            ]
+          : []),
+      ];
 
   return (
     <div
@@ -381,7 +430,6 @@ function ClaimCard({
           : "0 1px 4px rgba(0,0,0,.05)",
       }}
     >
-      {/* Barre colorée en haut */}
       <div
         style={{
           height: 3,
@@ -393,7 +441,6 @@ function ClaimCard({
         }}
       />
 
-      {/* En-tête cliquable */}
       <div
         onClick={() => setExpanded(!expanded)}
         style={{
@@ -453,7 +500,6 @@ function ClaimCard({
             </span>
           </div>
 
-          {/* Timer bar */}
           <TimerBar createdAt={c.createdAt} urgente={urgent || c.urgente} />
 
           {c.typeReclamation && (
@@ -473,7 +519,6 @@ function ClaimCard({
           )}
         </div>
 
-        {/* Flèche expand */}
         <div
           style={{
             color: "var(--gris-400)",
@@ -496,7 +541,6 @@ function ClaimCard({
         </div>
       </div>
 
-      {/* Contenu expandable */}
       {expanded && (
         <div
           style={{
@@ -515,7 +559,6 @@ function ClaimCard({
             {c.texte}
           </p>
 
-          {/* Infos client */}
           <div
             style={{
               display: "flex",
@@ -536,55 +579,22 @@ function ClaimCard({
             </span>
           </div>
 
-          {/* Historique */}
-          {c.historique?.length > 0 && (
-            <div
-              style={{
-                background: "var(--gris-100)",
-                borderRadius: 8,
-                padding: ".75rem",
-                marginBottom: ".875rem",
-                fontSize: ".8rem",
-              }}
-            >
+          {/* Fil de discussion avec le client */}
+          {threadMsgs.length > 0 && (
+            <div style={{ marginBottom: ".875rem" }}>
               <div
                 style={{
-                  fontWeight: 700,
-                  marginBottom: ".4rem",
-                  color: "var(--gris-600)",
                   fontSize: ".73rem",
+                  fontWeight: 700,
+                  color: "var(--gris-400)",
+                  marginBottom: ".25rem",
                   textTransform: "uppercase",
                   letterSpacing: ".04em",
                 }}
               >
-                Historique
+                Discussion
               </div>
-              {c.historique.map((h, i) => (
-                <div
-                  key={i}
-                  style={{
-                    paddingBottom: ".4rem",
-                    borderBottom: "1px solid var(--gris-200)",
-                    marginBottom: ".4rem",
-                  }}
-                >
-                  <span style={{ fontWeight: 600 }}>{h.service}</span> :{" "}
-                  {h.texte}
-                  <span
-                    style={{
-                      marginLeft: ".5rem",
-                      color: h.satisfait ? "var(--vert)" : "var(--rouge)",
-                      fontWeight: 700,
-                    }}
-                  >
-                    {h.satisfait === true
-                      ? "✓ Satisfait"
-                      : h.satisfait === false
-                        ? "✗ Non satisfait"
-                        : ""}
-                  </span>
-                </div>
-              ))}
+              <ClaimThread messages={threadMsgs} viewerSide="agent" />
             </div>
           )}
 
@@ -666,6 +676,18 @@ function ClaimCard({
                   Répondre
                 </button>
               </div>
+
+              {/* Rendez-vous d'intervention */}
+              <RdvPanel
+                rdv={c.rendezVous}
+                viewerSide="agent"
+                busy={rdvBusy === c._id}
+                handlers={{
+                  onSchedule: (date) => onScheduleRdv(c._id, date),
+                  onCancel: () => onCancelRdv(c._id),
+                  onReport: (payload) => onReportRdv(c._id, payload),
+                }}
+              />
             </div>
           )}
         </div>

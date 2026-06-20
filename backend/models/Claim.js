@@ -9,6 +9,49 @@ const ResponseSchema = new mongoose.Schema({
   satisfait: { type: Boolean, default: null }, // null = en attente, true/false = réponse client
 });
 
+// Sous-schéma pour la conversation continue client <-> service technique.
+// Permet l'échange de messages jusqu'à résolution.
+const MessageSchema = new mongoose.Schema({
+  expediteur: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+  // role de l'expéditeur : 'client' | 'service1'..'service4' | 'service_clientele'
+  role: { type: String, required: true },
+  texte: { type: String, required: true, maxlength: 2000 },
+  // 'message' = écrit par un humain, 'systeme' = événement auto (RDV, intervention...)
+  type: { type: String, enum: ["message", "systeme"], default: "message" },
+  date: { type: Date, default: Date.now },
+});
+
+// Sous-schéma pour le compte-rendu d'intervention (rempli après le RDV)
+const InterventionSchema = new mongoose.Schema({
+  effectuee: { type: Boolean, default: false },
+  compteRendu: { type: String, maxlength: 2000 },
+  note: { type: Number, min: 1, max: 5 }, // appréciation de l'intervention par l'agent
+  agentId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+  date: { type: Date },
+});
+
+// Sous-schéma pour le rendez-vous d'intervention
+const RendezVousSchema = new mongoose.Schema({
+  date: { type: Date }, // créneau planifié (date + heure)
+  statut: {
+    type: String,
+    // propose = proposé par l'agent, en attente du client
+    // confirme = accepté/choisi par le client
+    // annule = annulé par l'une des parties
+    // termine = intervention notée (RDV passé)
+    enum: ["propose", "confirme", "annule", "termine"],
+  },
+  proposePar: { type: String }, // role de la dernière personne ayant fixé le créneau
+  historiqueDates: [
+    {
+      date: Date,
+      par: String, // role
+      le: { type: Date, default: Date.now },
+    },
+  ],
+  intervention: { type: InterventionSchema, default: () => ({}) },
+});
+
 const ClaimSchema = new mongoose.Schema(
   {
     client: {
@@ -74,6 +117,12 @@ const ClaimSchema = new mongoose.Schema(
     // Suivi
     historique: [ResponseSchema],
     reponseActuelle: ResponseSchema,
+
+    // Conversation continue client <-> service (échange jusqu'à résolution)
+    conversation: [MessageSchema],
+
+    // Rendez-vous d'intervention planifié par l'agent technique
+    rendezVous: { type: RendezVousSchema, default: undefined },
 
     // Coordonnées géo du client (snapshot au moment du dépôt)
     geoLocation: {

@@ -26,6 +26,28 @@ router.patch(
   ctrl.assign,
 );
 router.patch("/:id/respond", protect, restrictTo(...services), ctrl.respond);
+
+// Conversation continue : le client répond dans le fil
+router.post("/:id/message", protect, restrictTo("client"), ctrl.clientReply);
+
+// Rendez-vous d'intervention
+const servicesTech = ["service1", "service2", "service3", "service4"];
+router.post("/:id/rdv", protect, restrictTo(...servicesTech), ctrl.scheduleRdv);
+router.patch("/:id/rdv", protect, restrictTo("client"), ctrl.clientUpdateRdv);
+router.patch("/:id/rdv/accept", protect, restrictTo("client"), ctrl.acceptRdv);
+router.patch(
+  "/:id/rdv/cancel",
+  protect,
+  restrictTo("client", ...servicesTech),
+  ctrl.cancelRdv,
+);
+router.patch(
+  "/:id/rdv/report",
+  protect,
+  restrictTo(...servicesTech),
+  ctrl.reportRdv,
+);
+
 router.patch("/:id/feedback", protect, restrictTo("client"), ctrl.feedback);
 router.patch(
   "/:id/return",

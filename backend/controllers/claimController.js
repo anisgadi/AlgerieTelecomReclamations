@@ -95,20 +95,12 @@ exports.list = async (req, res) => {
 // PATCH /api/claims/:id/assign — Triage par service_clientele
 exports.assign = async (req, res) => {
   try {
-    console.log("=== ASSIGN appelé ===");
-    console.log("Params:", req.params);
-    console.log("Body:", req.body);
-    console.log("User:", req.user?.role, req.user?._id);
-
     const { typeReclamation, serviceAssigne } = req.body;
     const claim = await Claim.findById(req.params.id);
 
     if (!claim) {
-      console.log("Réclamation introuvable");
       return res.status(404).json({ message: "Réclamation introuvable" });
     }
-
-    console.log("Claim avant:", claim.serviceAssigne, claim.statut);
 
     claim.typeReclamation = typeReclamation || claim.typeReclamation;
     claim.serviceAssigne = serviceAssigne;
@@ -116,8 +108,6 @@ exports.assign = async (req, res) => {
     claim.urgente = false;
 
     const saved = await claim.save();
-    console.log("Claim après save:", saved.serviceAssigne, saved.statut);
-
     res.json(saved);
   } catch (err) {
     console.error("Erreur assign:", err);
@@ -125,10 +115,13 @@ exports.assign = async (req, res) => {
   }
 };
 
-// PATCH /api/claims/:id/respond — Réponse du service
+// PATCH /api/claims/:id/respond — Réponse du service (alimente la conversation)
 exports.respond = async (req, res) => {
   try {
     const { texte } = req.body;
+    if (!texte || !texte.trim())
+      return res.status(400).json({ message: "Message vide" });
+
     const claim = await Claim.findById(req.params.id).populate(
       "client",
       "email nom",
@@ -137,21 +130,78 @@ exports.respond = async (req, res) => {
     if (!claim)
       return res.status(404).json({ message: "Réclamation introuvable" });
 
+    // Seul le service auquel la réclamation est affectée peut répondre
+    if (
+      req.user.role !== claim.serviceAssigne &&
+      req.user.role !== "service_clientele"
+    ) {
+      return res
+        .status(403)
+        .json({ message: "Réclamation non affectée à votre service" });
+    }
+
     claim.reponseActuelle = {
       service: req.user.role,
       agentId: req.user._id,
       texte,
     };
+    // Ajout au fil de discussion
+    claim.conversation.push({
+      expediteur: req.user._id,
+      role: req.user.role,
+      texte,
+      type: "message",
+    });
+
     claim.statut = "reponse_envoyee";
     claim.dateReponse = new Date();
     claim.marqueurMalTraite = false;
+    claim.urgente = false;
     await claim.save();
 
     await sendClaimNotification(
       claim.client.email,
       `Le service a répondu à votre réclamation : "${texte.substring(0, 100)}..."`,
-    );
+    ).catch(() => {});
 
+    res.json(claim);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+// POST /api/claims/:id/message — Réponse du client dans le fil de discussion
+exports.clientReply = async (req, res) => {
+  try {
+    const { texte } = req.body;
+    if (!texte || !texte.trim())
+      return res.status(400).json({ message: "Message vide" });
+
+    const claim = await Claim.findById(req.params.id);
+    if (!claim)
+      return res.status(404).json({ message: "Réclamation introuvable" });
+
+    if (String(claim.client) !== String(req.user._id))
+      return res.status(403).json({ message: "Accès refusé" });
+
+    if (["resolue", "archivee"].includes(claim.statut))
+      return res
+        .status(400)
+        .json({ message: "Cette réclamation est clôturée" });
+
+    claim.conversation.push({
+      expediteur: req.user._id,
+      role: "client",
+      texte,
+      type: "message",
+    });
+
+    // Le client relance : rouvrir côté service pour qu'il reprenne la main
+    if (claim.statut === "reponse_envoyee") claim.statut = "en_traitement";
+    // Une réponse écrite par le client lève le marqueur "mal traité" rouge
+    claim.marqueurMalTraite = false;
+
+    await claim.save();
     res.json(claim);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -168,7 +218,6 @@ exports.feedback = async (req, res) => {
       return res.status(404).json({ message: "Réclamation introuvable" });
 
     if (satisfait) {
-      // Archiver la réponse dans l'historique
       if (claim.reponseActuelle) {
         claim.historique.push({
           ...claim.reponseActuelle.toObject(),
@@ -178,7 +227,6 @@ exports.feedback = async (req, res) => {
       claim.statut = "resolue";
       claim.reponseActuelle = undefined;
     } else {
-      // Relancer avec marqueur rouge
       if (claim.reponseActuelle) {
         claim.historique.push({
           ...claim.reponseActuelle.toObject(),
@@ -223,7 +271,6 @@ exports.contactClient = async (req, res) => {
         `<p>${message}</p>`,
       );
     }
-    // SMS : simulation — retourner le numéro pour ouverture liens tel:
     res.json({
       success: true,
       smsLink:
@@ -231,6 +278,230 @@ exports.contactClient = async (req, res) => {
           ? `sms:${claim.client.mobile}?body=${encodeURIComponent(message)}`
           : null,
     });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+// ─── RENDEZ-VOUS D'INTERVENTION ──────────────────────────────────────────
+
+// Format date FR lisible pour les messages système
+function formatRdv(d) {
+  try {
+    return new Date(d).toLocaleString("fr-FR", {
+      weekday: "long",
+      day: "2-digit",
+      month: "long",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return new Date(d).toISOString();
+  }
+}
+
+// POST /api/claims/:id/rdv — L'agent technique planifie (ou re-propose) un RDV
+exports.scheduleRdv = async (req, res) => {
+  try {
+    const { date } = req.body;
+    const claim = await Claim.findById(req.params.id);
+    if (!claim)
+      return res.status(404).json({ message: "Réclamation introuvable" });
+
+    if (claim.serviceAssigne !== req.user.role)
+      return res
+        .status(403)
+        .json({ message: "Réclamation non affectée à votre service" });
+
+    const d = new Date(date);
+    if (isNaN(d.getTime()))
+      return res.status(400).json({ message: "Date invalide" });
+    if (d.getTime() < Date.now())
+      return res
+        .status(400)
+        .json({ message: "Le créneau doit être dans le futur" });
+
+    claim.rendezVous = {
+      date: d,
+      statut: "propose",
+      proposePar: req.user.role,
+      historiqueDates: [{ date: d, par: req.user.role }],
+      intervention: {},
+    };
+
+    claim.conversation.push({
+      expediteur: req.user._id,
+      role: req.user.role,
+      type: "systeme",
+      texte: `Rendez-vous proposé pour le ${formatRdv(d)}. Le client peut le confirmer ou choisir un autre créneau.`,
+    });
+
+    await claim.save();
+    res.json(claim);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+// PATCH /api/claims/:id/rdv — Le client choisit/modifie le créneau
+exports.clientUpdateRdv = async (req, res) => {
+  try {
+    const { date } = req.body;
+    const claim = await Claim.findById(req.params.id);
+    if (!claim)
+      return res.status(404).json({ message: "Réclamation introuvable" });
+
+    if (String(claim.client) !== String(req.user._id))
+      return res.status(403).json({ message: "Accès refusé" });
+
+    if (!claim.rendezVous || !claim.rendezVous.date)
+      return res.status(400).json({ message: "Aucun rendez-vous à modifier" });
+
+    if (claim.rendezVous.statut === "termine")
+      return res
+        .status(400)
+        .json({
+          message: "Intervention déjà réalisée, modification impossible",
+        });
+
+    const d = new Date(date);
+    if (isNaN(d.getTime()))
+      return res.status(400).json({ message: "Date invalide" });
+    if (d.getTime() < Date.now())
+      return res
+        .status(400)
+        .json({ message: "Le créneau doit être dans le futur" });
+
+    claim.rendezVous.date = d;
+    claim.rendezVous.statut = "confirme";
+    claim.rendezVous.proposePar = "client";
+    claim.rendezVous.historiqueDates.push({ date: d, par: "client" });
+
+    claim.conversation.push({
+      expediteur: req.user._id,
+      role: "client",
+      type: "systeme",
+      texte: `Le client a choisi le créneau du ${formatRdv(d)} (rendez-vous confirmé).`,
+    });
+
+    await claim.save();
+    res.json(claim);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+// PATCH /api/claims/:id/rdv/accept — Le client accepte le créneau proposé tel quel
+exports.acceptRdv = async (req, res) => {
+  try {
+    const claim = await Claim.findById(req.params.id);
+    if (!claim)
+      return res.status(404).json({ message: "Réclamation introuvable" });
+
+    if (String(claim.client) !== String(req.user._id))
+      return res.status(403).json({ message: "Accès refusé" });
+
+    if (!claim.rendezVous || !claim.rendezVous.date)
+      return res.status(400).json({ message: "Aucun rendez-vous à confirmer" });
+
+    claim.rendezVous.statut = "confirme";
+    claim.conversation.push({
+      expediteur: req.user._id,
+      role: "client",
+      type: "systeme",
+      texte: `Le client a confirmé le rendez-vous du ${formatRdv(claim.rendezVous.date)}.`,
+    });
+
+    await claim.save();
+    res.json(claim);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+// PATCH /api/claims/:id/rdv/cancel — Annulation par le client ou l'agent
+exports.cancelRdv = async (req, res) => {
+  try {
+    const claim = await Claim.findById(req.params.id);
+    if (!claim)
+      return res.status(404).json({ message: "Réclamation introuvable" });
+
+    const isOwner = String(claim.client) === String(req.user._id);
+    const isAssignedService = claim.serviceAssigne === req.user.role;
+    if (!isOwner && !isAssignedService)
+      return res.status(403).json({ message: "Accès refusé" });
+
+    if (!claim.rendezVous || !claim.rendezVous.date)
+      return res.status(400).json({ message: "Aucun rendez-vous à annuler" });
+
+    if (claim.rendezVous.statut === "termine")
+      return res.status(400).json({ message: "Intervention déjà réalisée" });
+
+    claim.rendezVous.statut = "annule";
+    claim.conversation.push({
+      expediteur: req.user._id,
+      role: req.user.role,
+      type: "systeme",
+      texte: `Rendez-vous annulé par ${isOwner ? "le client" : "le service technique"}.`,
+    });
+
+    await claim.save();
+    res.json(claim);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+// PATCH /api/claims/:id/rdv/report — L'agent note l'intervention (RDV passé uniquement)
+exports.reportRdv = async (req, res) => {
+  try {
+    const { compteRendu, note } = req.body;
+    const claim = await Claim.findById(req.params.id);
+    if (!claim)
+      return res.status(404).json({ message: "Réclamation introuvable" });
+
+    if (claim.serviceAssigne !== req.user.role)
+      return res
+        .status(403)
+        .json({ message: "Réclamation non affectée à votre service" });
+
+    if (!claim.rendezVous || !claim.rendezVous.date)
+      return res.status(400).json({ message: "Aucun rendez-vous planifié" });
+
+    if (claim.rendezVous.statut === "annule")
+      return res.status(400).json({ message: "Rendez-vous annulé" });
+
+    // Gating clé : l'intervention ne peut être notée qu'une fois le créneau passé
+    if (new Date(claim.rendezVous.date).getTime() > Date.now())
+      return res.status(400).json({
+        message:
+          "Le rendez-vous n'a pas encore eu lieu — intervention non notable",
+      });
+
+    if (!compteRendu || !compteRendu.trim())
+      return res.status(400).json({ message: "Compte-rendu requis" });
+
+    const noteNum = note ? Number(note) : undefined;
+
+    claim.rendezVous.intervention = {
+      effectuee: true,
+      compteRendu,
+      note: noteNum,
+      agentId: req.user._id,
+      date: new Date(),
+    };
+    claim.rendezVous.statut = "termine";
+
+    claim.conversation.push({
+      expediteur: req.user._id,
+      role: req.user.role,
+      type: "systeme",
+      texte: `Intervention réalisée${noteNum ? ` (appréciation : ${noteNum}/5)` : ""}. Compte-rendu : ${compteRendu}`,
+    });
+
+    await claim.save();
+    res.json(claim);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
