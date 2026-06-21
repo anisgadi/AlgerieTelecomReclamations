@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, Fragment } from "react";
 import api from "../api/axios";
 import { useAuth } from "../context/AuthContext";
 import ClaimThread from "../components/ClaimThread";
@@ -12,6 +12,7 @@ const SERVICE_LABELS = {
   service4: "Service Technique 4",
   service_clientele: "Service Clientèle",
 };
+const TYPE_ALL = "__all__";
 
 function tempsEcoule(dateStr) {
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -81,7 +82,10 @@ export default function Dashboard() {
   const [reponses, setReponses] = useState({});
   const [contactForm, setContactForm] = useState(null);
   const [contactMsg, setContactMsg] = useState("");
-  const [rdvBusy, setRdvBusy] = useState(null);
+
+  // ── Tri / filtre du tableau de bord ──
+  const [sortBy, setSortBy] = useState("duree"); // "duree" | "type"
+  const [typeFilter, setTypeFilter] = useState(TYPE_ALL);
 
   const load = async () => {
     try {
@@ -103,9 +107,13 @@ export default function Dashboard() {
 
   const assign = async (id, serviceAssigne) => {
     try {
-      await api.patch(`/claims/${id}/assign`, { serviceAssigne });
+      const { data } = await api.patch(`/claims/${id}/assign`, {
+        serviceAssigne,
+      });
+      void data;
       load();
     } catch (err) {
+      console.error("Erreur assign:", err.response?.data || err.message);
       alert("Erreur: " + (err.response?.data?.message || err.message));
     }
   };
@@ -121,6 +129,8 @@ export default function Dashboard() {
     await api.patch(`/claims/${id}/return`);
     load();
   };
+
+  const [rdvBusy, setRdvBusy] = useState(null);
 
   const scheduleRdv = async (id, date) => {
     setRdvBusy(id);
@@ -177,10 +187,29 @@ export default function Dashboard() {
       </div>
     );
 
-  const urgentes = claims.filter((c) => c.urgente);
-  const normales = claims.filter((c) => !c.urgente);
+  const types = [
+    ...new Set(claims.map((c) => c.typeReclamation).filter(Boolean)),
+  ].sort((a, b) => a.localeCompare(b, "fr"));
 
-  const cardProps = {
+  const filtered = claims.filter(
+    (c) => typeFilter === TYPE_ALL || c.typeReclamation === typeFilter,
+  );
+
+  const byAgeAsc = (a, b) => new Date(a.createdAt) - new Date(b.createdAt);
+
+  const urgentes = filtered.filter((c) => c.urgente).sort(byAgeAsc);
+  const normales = filtered.filter((c) => !c.urgente).sort(byAgeAsc);
+
+  const parType = [...filtered].sort((a, b) => {
+    const ta = a.typeReclamation || "Sans type";
+    const tb = b.typeReclamation || "Sans type";
+    if (ta !== tb) return ta.localeCompare(tb, "fr");
+    if (Boolean(a.urgente) !== Boolean(b.urgente)) return a.urgente ? -1 : 1;
+    return byAgeAsc(a, b);
+  });
+
+  const cardProps = (c) => ({
+    claim: c,
     user,
     reponses,
     setReponses,
@@ -192,7 +221,7 @@ export default function Dashboard() {
     onCancelRdv: cancelRdv,
     onReportRdv: reportRdv,
     rdvBusy,
-  };
+  });
 
   return (
     <div className="container page">
@@ -201,7 +230,7 @@ export default function Dashboard() {
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
-          marginBottom: "1.5rem",
+          marginBottom: "1.25rem",
         }}
       >
         <h1 className="page-title" style={{ margin: 0 }}>
@@ -225,9 +254,51 @@ export default function Dashboard() {
             </span>
           )}
           <span style={{ fontSize: ".78rem", color: "var(--gris-400)" }}>
-            {claims.length} réclamation{claims.length > 1 ? "s" : ""}
+            {filtered.length} réclamation{filtered.length > 1 ? "s" : ""}
           </span>
         </div>
+      </div>
+
+      {/* ── Barre de tri / filtre ── */}
+      <div className="dash-toolbar">
+        <span
+          style={{
+            fontSize: ".75rem",
+            fontWeight: 700,
+            color: "var(--gris-400)",
+            textTransform: "uppercase",
+            letterSpacing: ".04em",
+          }}
+        >
+          Trier par
+        </span>
+        <div className="arch-seg">
+          <button
+            className={sortBy === "duree" ? "on" : ""}
+            onClick={() => setSortBy("duree")}
+          >
+            Durée (urgence)
+          </button>
+          <button
+            className={sortBy === "type" ? "on" : ""}
+            onClick={() => setSortBy("type")}
+          >
+            Type
+          </button>
+        </div>
+
+        <select
+          className="form-input dash-type-filter"
+          value={typeFilter}
+          onChange={(e) => setTypeFilter(e.target.value)}
+        >
+          <option value={TYPE_ALL}>Tous les types</option>
+          {types.map((t) => (
+            <option key={t} value={t}>
+              {t}
+            </option>
+          ))}
+        </select>
       </div>
 
       <style>{`
@@ -282,7 +353,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      {claims.length === 0 && (
+      {filtered.length === 0 && (
         <div
           className="card"
           style={{
@@ -291,88 +362,109 @@ export default function Dashboard() {
             padding: "3rem",
           }}
         >
-          Aucune réclamation en attente.
+          Aucune réclamation à afficher.
         </div>
       )}
 
-      {/* ── SECTION URGENTES ── */}
-      {urgentes.length > 0 && (
-        <div style={{ marginBottom: "1.5rem" }}>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: ".5rem",
-              marginBottom: ".75rem",
-            }}
-          >
-            <div
-              style={{
-                width: 8,
-                height: 8,
-                borderRadius: "50%",
-                background: "#ef4444",
-                boxShadow: "0 0 0 3px rgba(239,68,68,.2)",
-                animation: "pulse-red 1.5s infinite",
-              }}
-            />
-            <span
-              style={{
-                fontSize: ".8rem",
-                fontWeight: 700,
-                color: "#dc2626",
-                textTransform: "uppercase",
-                letterSpacing: ".05em",
-              }}
-            >
-              Réclamations urgentes — non traitées depuis plus de 24h
-            </span>
-          </div>
-
-          {urgentes.map((c) => (
-            <ClaimCard key={c._id} claim={c} {...cardProps} urgent />
-          ))}
-        </div>
-      )}
-
-      {/* ── SECTION NORMALES ── */}
-      {normales.length > 0 && (
-        <div>
+      {/* ════════ TRI PAR DURÉE (urgence) ════════ */}
+      {sortBy === "duree" && (
+        <>
           {urgentes.length > 0 && (
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: ".5rem",
-                marginBottom: ".75rem",
-              }}
-            >
+            <div style={{ marginBottom: "1.5rem" }}>
               <div
                 style={{
-                  width: 8,
-                  height: 8,
-                  borderRadius: "50%",
-                  background: "var(--violet)",
-                }}
-              />
-              <span
-                style={{
-                  fontSize: ".8rem",
-                  fontWeight: 700,
-                  color: "var(--gris-600)",
-                  textTransform: "uppercase",
-                  letterSpacing: ".05em",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: ".5rem",
+                  marginBottom: ".75rem",
                 }}
               >
-                En cours de traitement
-              </span>
+                <div
+                  style={{
+                    width: 8,
+                    height: 8,
+                    borderRadius: "50%",
+                    background: "#ef4444",
+                    boxShadow: "0 0 0 3px rgba(239,68,68,.2)",
+                    animation: "pulse-red 1.5s infinite",
+                  }}
+                />
+                <span
+                  style={{
+                    fontSize: ".8rem",
+                    fontWeight: 700,
+                    color: "#dc2626",
+                    textTransform: "uppercase",
+                    letterSpacing: ".05em",
+                  }}
+                >
+                  Réclamations urgentes — non traitées depuis plus de 24h
+                </span>
+              </div>
+
+              {urgentes.map((c) => (
+                <ClaimCard key={c._id} {...cardProps(c)} urgent />
+              ))}
             </div>
           )}
-          {normales.map((c) => (
-            <ClaimCard key={c._id} claim={c} {...cardProps} />
-          ))}
-        </div>
+
+          {normales.length > 0 && (
+            <div>
+              {urgentes.length > 0 && (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: ".5rem",
+                    marginBottom: ".75rem",
+                  }}
+                >
+                  <div
+                    style={{
+                      width: 8,
+                      height: 8,
+                      borderRadius: "50%",
+                      background: "var(--violet)",
+                    }}
+                  />
+                  <span
+                    style={{
+                      fontSize: ".8rem",
+                      fontWeight: 700,
+                      color: "var(--gris-600)",
+                      textTransform: "uppercase",
+                      letterSpacing: ".05em",
+                    }}
+                  >
+                    En cours de traitement
+                  </span>
+                </div>
+              )}
+              {normales.map((c) => (
+                <ClaimCard key={c._id} {...cardProps(c)} />
+              ))}
+            </div>
+          )}
+        </>
       )}
+
+      {/* ════════ TRI PAR TYPE (groupé) ════════ */}
+      {sortBy === "type" &&
+        filtered.length > 0 &&
+        (() => {
+          let lastType = null;
+          return parType.map((c) => {
+            const t = c.typeReclamation || "Sans type";
+            const showHead = t !== lastType;
+            lastType = t;
+            return (
+              <Fragment key={c._id}>
+                {showHead && <div className="dash-type-head">{t}</div>}
+                <ClaimCard {...cardProps(c)} urgent={c.urgente} />
+              </Fragment>
+            );
+          });
+        })()}
     </div>
   );
 }
@@ -394,27 +486,6 @@ function ClaimCard({
   urgent,
 }) {
   const [expanded, setExpanded] = useState(urgent);
-
-  const threadMsgs = c.conversation?.length
-    ? c.conversation
-    : [
-        ...(c.historique || []).map((h) => ({
-          role: h.service || "service1",
-          texte: h.texte,
-          type: "message",
-          date: h.date,
-        })),
-        ...(c.reponseActuelle
-          ? [
-              {
-                role: c.reponseActuelle.service || "service1",
-                texte: c.reponseActuelle.texte,
-                type: "message",
-                date: c.reponseActuelle.date,
-              },
-            ]
-          : []),
-      ];
 
   return (
     <div
@@ -579,8 +650,60 @@ function ClaimCard({
             </span>
           </div>
 
-          {/* Fil de discussion avec le client */}
-          {threadMsgs.length > 0 && (
+          {c.historique?.length > 0 && (
+            <div
+              style={{
+                background: "var(--gris-100)",
+                borderRadius: 8,
+                padding: ".75rem",
+                marginBottom: ".875rem",
+                fontSize: ".8rem",
+              }}
+            >
+              <div
+                style={{
+                  fontWeight: 700,
+                  marginBottom: ".4rem",
+                  color: "var(--gris-600)",
+                  fontSize: ".73rem",
+                  textTransform: "uppercase",
+                  letterSpacing: ".04em",
+                }}
+              >
+                Historique
+              </div>
+              {c.historique.map((h, i) => (
+                <div
+                  key={i}
+                  style={{
+                    paddingBottom: ".4rem",
+                    borderBottom: "1px solid var(--gris-200)",
+                    marginBottom: ".4rem",
+                  }}
+                >
+                  <span style={{ fontWeight: 600 }}>{h.service}</span> :{" "}
+                  {h.texte}
+                  <span
+                    style={{
+                      marginLeft: ".5rem",
+                      color: h.satisfait ? "var(--vert)" : "var(--rouge)",
+                      fontWeight: 700,
+                    }}
+                  >
+                    {h.satisfait === true
+                      ? "✓ Satisfait"
+                      : h.satisfait === false
+                        ? "✗ Non satisfait"
+                        : ""}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {(c.conversation?.length > 0 ||
+            c.reponseActuelle ||
+            c.historique?.length > 0) && (
             <div style={{ marginBottom: ".875rem" }}>
               <div
                 style={{
@@ -594,11 +717,34 @@ function ClaimCard({
               >
                 Discussion
               </div>
-              <ClaimThread messages={threadMsgs} viewerSide="agent" />
+              <ClaimThread
+                messages={
+                  c.conversation?.length
+                    ? c.conversation
+                    : [
+                        ...(c.historique || []).map((h) => ({
+                          role: h.service || "service1",
+                          texte: h.texte,
+                          type: "message",
+                          date: h.date,
+                        })),
+                        ...(c.reponseActuelle
+                          ? [
+                              {
+                                role: c.reponseActuelle.service || "service1",
+                                texte: c.reponseActuelle.texte,
+                                type: "message",
+                                date: c.reponseActuelle.date,
+                              },
+                            ]
+                          : []),
+                      ]
+                }
+                viewerSide="agent"
+              />
             </div>
           )}
 
-          {/* Actions service_clientele */}
           {user?.role === "service_clientele" && (
             <div>
               <div
@@ -627,7 +773,6 @@ function ClaimCard({
             </div>
           )}
 
-          {/* Actions services techniques */}
           {SERVICES.includes(user?.role) && (
             <div>
               <div
@@ -677,7 +822,6 @@ function ClaimCard({
                 </button>
               </div>
 
-              {/* Rendez-vous d'intervention */}
               <RdvPanel
                 rdv={c.rendezVous}
                 viewerSide="agent"

@@ -1,10 +1,35 @@
+import { useEffect, useState } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import api from "../api/axios";
+
+const SERVICE_ROLES = [
+  "service_clientele",
+  "service1",
+  "service2",
+  "service3",
+  "service4",
+];
+
+// Calcule le nombre de notifications selon le rôle
+function countNotifs(claims, role) {
+  if (role === "client")
+    return claims.filter((c) => c.statut === "reponse_envoyee").length;
+  if (role === "service_clientele")
+    return claims.filter((c) => ["deposee", "en_triage"].includes(c.statut))
+      .length;
+  if (SERVICE_ROLES.includes(role))
+    return claims.filter((c) =>
+      ["dirigee_service", "mal_traitee"].includes(c.statut),
+    ).length;
+  return 0;
+}
 
 export default function Navbar() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const [notif, setNotif] = useState(0);
 
   const handleLogout = () => {
     logout();
@@ -34,6 +59,37 @@ export default function Navbar() {
         : serviceLinks;
   const isActive = (path) => location.pathname === path;
 
+  // Lien qui doit porter la pastille de notification
+  const notifPath =
+    user?.role === "client"
+      ? "/archives"
+      : SERVICE_ROLES.includes(user?.role)
+        ? "/dashboard"
+        : null;
+
+  // Récupère les réclamations et calcule les notifications (sauf admin)
+  useEffect(() => {
+    if (!user || !notifPath) {
+      setNotif(0);
+      return;
+    }
+    let alive = true;
+    const load = async () => {
+      try {
+        const { data } = await api.get("/claims");
+        if (alive) setNotif(countNotifs(data, user.role));
+      } catch {
+        /* silencieux */
+      }
+    };
+    load();
+    const t = setInterval(load, 30000);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, [user, notifPath, location.pathname]);
+
   return (
     <nav className="navbar">
       <Link to="/" className="navbar-brand">
@@ -48,11 +104,7 @@ export default function Navbar() {
           <img
             src="/logo-at-violet.png"
             alt="AT Logo"
-            style={{
-              width: "45px",
-              height: "45px",
-              objectFit: "contain",
-            }}
+            style={{ width: "45px", height: "45px", objectFit: "contain" }}
           />
 
           <div
@@ -72,7 +124,6 @@ export default function Navbar() {
             >
               TÉLÉCOM
             </span>
-
             <span
               style={{
                 color: "#18181b",
@@ -101,6 +152,9 @@ export default function Navbar() {
             }
           >
             {l.label}
+            {l.to === notifPath && notif > 0 && (
+              <span className="nav-notif">{notif > 99 ? "99+" : notif}</span>
+            )}
           </Link>
         ))}
       </div>

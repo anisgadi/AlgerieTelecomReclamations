@@ -607,89 +607,36 @@ a {
     padding: 0 1rem;
   }
 }
-body.ui-soft {
-  --grad: linear-gradient(135deg, #a000e1 0%, #7600dc 100%);
-  --grad-h: linear-gradient(90deg, #7600dc 0%, #a000e1 100%);
-  --sh-brand: 0 8px 22px rgba(118, 0, 220, 0.3);
-  --violet-bg: #f3e8ff;
-  --violet-border: #e3ccfb;
-  background:
-    radial-gradient(
-      1200px 520px at 50% -10%,
-      #f6edff 0%,
-      rgba(246, 237, 255, 0) 62%
-    ),
-    #fbf9ff;
-  background-attachment: fixed;
-}
-
-/* Navbar */
-body.ui-soft .navbar {
-  background: rgba(255, 255, 255, 0.85);
-  backdrop-filter: saturate(1.4) blur(16px);
-  border-bottom: 1px solid var(--violet-border);
-}
-body.ui-soft .nav-link {
-  padding: 7px 12px;
-  border-radius: 9px;
-  border-bottom: none;
-}
-body.ui-soft .nav-link:hover {
-  color: var(--violet);
-  background: var(--violet-bg);
-  border-bottom: none;
-}
-body.ui-soft .nav-link.active {
-  color: #fff !important;
-  background: var(--grad);
-  box-shadow: var(--sh-brand);
-  border-bottom: none !important;
-}
-body.ui-soft .user-chip {
-  background: var(--grad);
+/* Pastille rouge de notification dans la navbar */
+.nav-notif {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  margin-left: 6px;
+  border-radius: 99px;
+  background: var(--rouge);
   color: #fff;
+  font-size: 0.68rem;
+  font-weight: 800;
+  line-height: 1;
+  vertical-align: middle;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.18);
+  animation: notif-pulse 2s infinite;
 }
-body.ui-soft .user-chip svg {
-  opacity: 0.9;
-}
-
-/* Cartes */
-body.ui-soft .card {
-  border-radius: 18px;
-  border: 1px solid #efe6fb;
-  box-shadow:
-    0 1px 3px rgba(46, 16, 70, 0.05),
-    0 10px 30px rgba(46, 16, 70, 0.06);
-  transition:
-    transform 0.2s,
-    box-shadow 0.2s,
-    border-color 0.2s;
-}
-body.ui-soft .card:hover {
-  transform: translateY(-2px);
-  border-color: var(--violet-border);
-  box-shadow: 0 18px 44px rgba(46, 16, 70, 0.12);
+@keyframes notif-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.25);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.12);
+  }
 }
 
-/* Boutons primaires */
-body.ui-soft .btn-primary {
-  box-shadow: var(--sh-brand);
-}
-body.ui-soft .btn-primary:hover:not(:disabled) {
-  filter: brightness(1.06) saturate(1.04);
-  opacity: 1;
-  transform: translateY(-1px);
-  box-shadow: 0 12px 28px rgba(118, 0, 220, 0.4);
-}
-
-/* Progression — halo renforcé */
-body.ui-soft .p-step.active .p-dot {
-  box-shadow: 0 0 0 5px rgba(118, 0, 220, 0.16);
-}
-
-/* ============================================================
-   MES ARCHIVES — barre d'outils, filtre segmenté, 3 sections
-   ============================================================ */
+/* Barre d'outils (archives + dashboard) */
 .arch-toolbar {
   display: flex;
   align-items: center;
@@ -698,13 +645,15 @@ body.ui-soft .p-step.active .p-dot {
   flex-wrap: wrap;
   margin-bottom: 1.5rem;
 }
+
+/* Contrôle segmenté (réutilisé par les archives ET le tableau de bord) */
 .arch-seg {
   display: inline-flex;
   padding: 4px;
   gap: 4px;
-  background: #f1eafc;
-  border: 1px solid #e6dafa;
-  border-radius: 14px;
+  background: var(--gris-100);
+  border: 1px solid var(--gris-200);
+  border-radius: 12px;
 }
 .arch-seg button {
   border: 0;
@@ -715,7 +664,7 @@ body.ui-soft .p-step.active .p-dot {
   font-weight: 600;
   color: var(--gris-600);
   padding: 8px 14px;
-  border-radius: 10px;
+  border-radius: 9px;
   transition: all 0.15s;
   display: inline-flex;
   align-items: center;
@@ -725,11 +674,11 @@ body.ui-soft .p-step.active .p-dot {
   color: var(--violet);
 }
 .arch-seg button.on {
-  background: var(--grad, linear-gradient(135deg, #a000e1, #7600dc));
+  background: linear-gradient(135deg, var(--violet), var(--violet-clair));
   color: #fff;
-  box-shadow: 0 6px 16px rgba(118, 0, 220, 0.28);
+  box-shadow: var(--shadow-md);
 }
-.arch-seg .seg-count {
+.seg-count {
   font-size: 0.7rem;
   font-weight: 700;
   min-width: 18px;
@@ -746,6 +695,7 @@ body.ui-soft .p-step.active .p-dot {
   color: #fff;
 }
 
+/* Sections des archives */
 .arch-section {
   margin-bottom: 2rem;
 }
@@ -759,7 +709,7 @@ body.ui-soft .p-step.active .p-dot {
   width: 4px;
   height: 20px;
   border-radius: 99px;
-  background: var(--grad, linear-gradient(135deg, #a000e1, #7600dc));
+  background: linear-gradient(180deg, var(--violet-clair), var(--violet));
 }
 .arch-section-head h2 {
   font-size: 1.05rem;
@@ -772,15 +722,38 @@ body.ui-soft .p-step.active .p-dot {
   font-weight: 700;
   padding: 2px 9px;
   border-radius: 99px;
-  background: var(--violet-bg, #f3e8ff);
+  background: var(--violet-bg);
   color: var(--violet);
-  border: 1px solid var(--violet-border, #e3ccfb);
+  border: 1px solid var(--violet-border);
 }
 .arch-empty {
   color: var(--gris-400);
   font-size: 0.85rem;
   padding: 0.85rem 1rem;
-  background: #faf7ff;
-  border: 1px dashed #e6dafa;
+  background: var(--gris-50);
+  border: 1px dashed var(--gris-200);
   border-radius: 12px;
+}
+
+/* Tableau de bord : barre de tri + en-têtes de groupe par type */
+.dash-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.25rem;
+}
+.dash-type-filter {
+  max-width: 260px;
+  padding: 8px 12px;
+}
+.dash-type-head {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--violet);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 1.25rem 0 0.6rem;
+  border-left: 3px solid var(--violet);
+  padding-left: 0.6rem;
 }
