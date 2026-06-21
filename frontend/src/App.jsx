@@ -1,4 +1,11 @@
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { useEffect } from "react";
+import {
+  BrowserRouter,
+  Routes,
+  Route,
+  Navigate,
+  useLocation,
+} from "react-router-dom";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import Navbar from "./components/Navbar";
 import Home from "./pages/Home";
@@ -18,10 +25,22 @@ function PrivateRoute({ children, roles }) {
   return children;
 }
 
+// Active le thème « violet raffiné » partout SAUF sur la page Admin.
+// La page /admin n'a jamais la classe ui-soft → elle reste inchangée.
+function ThemeScope() {
+  const { pathname } = useLocation();
+  useEffect(() => {
+    const isAdmin = pathname.startsWith("/admin");
+    document.body.classList.toggle("ui-soft", !isAdmin);
+  }, [pathname]);
+  return null;
+}
+
 export default function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
+        <ThemeScope />
         <Navbar />
         <Routes>
           <Route path="/" element={<Home />} />

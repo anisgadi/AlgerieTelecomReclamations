@@ -607,3 +607,180 @@ a {
     padding: 0 1rem;
   }
 }
+body.ui-soft {
+  --grad: linear-gradient(135deg, #a000e1 0%, #7600dc 100%);
+  --grad-h: linear-gradient(90deg, #7600dc 0%, #a000e1 100%);
+  --sh-brand: 0 8px 22px rgba(118, 0, 220, 0.3);
+  --violet-bg: #f3e8ff;
+  --violet-border: #e3ccfb;
+  background:
+    radial-gradient(
+      1200px 520px at 50% -10%,
+      #f6edff 0%,
+      rgba(246, 237, 255, 0) 62%
+    ),
+    #fbf9ff;
+  background-attachment: fixed;
+}
+
+/* Navbar */
+body.ui-soft .navbar {
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: saturate(1.4) blur(16px);
+  border-bottom: 1px solid var(--violet-border);
+}
+body.ui-soft .nav-link {
+  padding: 7px 12px;
+  border-radius: 9px;
+  border-bottom: none;
+}
+body.ui-soft .nav-link:hover {
+  color: var(--violet);
+  background: var(--violet-bg);
+  border-bottom: none;
+}
+body.ui-soft .nav-link.active {
+  color: #fff !important;
+  background: var(--grad);
+  box-shadow: var(--sh-brand);
+  border-bottom: none !important;
+}
+body.ui-soft .user-chip {
+  background: var(--grad);
+  color: #fff;
+}
+body.ui-soft .user-chip svg {
+  opacity: 0.9;
+}
+
+/* Cartes */
+body.ui-soft .card {
+  border-radius: 18px;
+  border: 1px solid #efe6fb;
+  box-shadow:
+    0 1px 3px rgba(46, 16, 70, 0.05),
+    0 10px 30px rgba(46, 16, 70, 0.06);
+  transition:
+    transform 0.2s,
+    box-shadow 0.2s,
+    border-color 0.2s;
+}
+body.ui-soft .card:hover {
+  transform: translateY(-2px);
+  border-color: var(--violet-border);
+  box-shadow: 0 18px 44px rgba(46, 16, 70, 0.12);
+}
+
+/* Boutons primaires */
+body.ui-soft .btn-primary {
+  box-shadow: var(--sh-brand);
+}
+body.ui-soft .btn-primary:hover:not(:disabled) {
+  filter: brightness(1.06) saturate(1.04);
+  opacity: 1;
+  transform: translateY(-1px);
+  box-shadow: 0 12px 28px rgba(118, 0, 220, 0.4);
+}
+
+/* Progression — halo renforcé */
+body.ui-soft .p-step.active .p-dot {
+  box-shadow: 0 0 0 5px rgba(118, 0, 220, 0.16);
+}
+
+/* ============================================================
+   MES ARCHIVES — barre d'outils, filtre segmenté, 3 sections
+   ============================================================ */
+.arch-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.5rem;
+}
+.arch-seg {
+  display: inline-flex;
+  padding: 4px;
+  gap: 4px;
+  background: #f1eafc;
+  border: 1px solid #e6dafa;
+  border-radius: 14px;
+}
+.arch-seg button {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--gris-600);
+  padding: 8px 14px;
+  border-radius: 10px;
+  transition: all 0.15s;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.arch-seg button:hover {
+  color: var(--violet);
+}
+.arch-seg button.on {
+  background: var(--grad, linear-gradient(135deg, #a000e1, #7600dc));
+  color: #fff;
+  box-shadow: 0 6px 16px rgba(118, 0, 220, 0.28);
+}
+.arch-seg .seg-count {
+  font-size: 0.7rem;
+  font-weight: 700;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 99px;
+  display: inline-grid;
+  place-items: center;
+  background: rgba(118, 0, 220, 0.12);
+  color: var(--violet);
+}
+.arch-seg button.on .seg-count {
+  background: rgba(255, 255, 255, 0.25);
+  color: #fff;
+}
+
+.arch-section {
+  margin-bottom: 2rem;
+}
+.arch-section-head {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  margin: 0 0 1rem;
+}
+.arch-section-head .bar {
+  width: 4px;
+  height: 20px;
+  border-radius: 99px;
+  background: var(--grad, linear-gradient(135deg, #a000e1, #7600dc));
+}
+.arch-section-head h2 {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--gris-900);
+  letter-spacing: -0.01em;
+}
+.arch-section-head .count {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 2px 9px;
+  border-radius: 99px;
+  background: var(--violet-bg, #f3e8ff);
+  color: var(--violet);
+  border: 1px solid var(--violet-border, #e3ccfb);
+}
+.arch-empty {
+  color: var(--gris-400);
+  font-size: 0.85rem;
+  padding: 0.85rem 1rem;
+  background: #faf7ff;
+  border: 1px dashed #e6dafa;
+  border-radius: 12px;
+}
